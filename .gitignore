@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.AppImage
+*.AppImage.part*
+*.snap
+build/
+dist/
+snap/
+snap-tools/
+launcher/
+RELEASE-NOTES-*.md
+publish-to-github.sh
