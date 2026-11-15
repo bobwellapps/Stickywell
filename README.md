@@ -2,7 +2,8 @@
 
 Simple sticky notes for the Linux desktop.
 
-![Stickywell notes on a desktop](docs/screenshot.png)
+<img width="1728" height="972" alt="stickywelscreenshotl" src="https://github.com/user-attachments/assets/4a34a0e2-648c-4ab8-965f-bb17a94332cb" />
+
 
 Stickywell puts coloured sticky notes on your desktop and keeps out of the way.
 Type a note, drag it where you want it, and it will still be there next time.
