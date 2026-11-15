@@ -65,11 +65,6 @@ from your application menu to bring hidden notes back.
 Notes are stored in `~/.local/share/stickywell/notes.json` (for the snap,
 `~/snap/stickywell/current/.local/share/stickywell/notes.json`).
 
-## Good to know
-
-Stickywell runs through XWayland on Wayland desktops. Native Wayland does not let an
-app choose where its windows go or keep them on top, and sticky notes need both.
-
 ## Licence
 
 Stickywell is free software under the
