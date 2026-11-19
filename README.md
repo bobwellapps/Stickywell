@@ -2,8 +2,7 @@
 
 Simple sticky notes for the Linux desktop.
 
-<img width="1728" height="972" alt="stickywelscreenshotl" src="https://github.com/user-attachments/assets/4a34a0e2-648c-4ab8-965f-bb17a94332cb" />
-
+![Stickywell notes on a desktop](docs/screenshot.png)
 
 Stickywell puts coloured sticky notes on your desktop and keeps out of the way.
 Type a note, drag it where you want it, and it will still be there next time.
@@ -17,6 +16,8 @@ Type a note, drag it where you want it, and it will still be there next time.
 - Optional tray icon and taskbar icon, so it can run quietly in the background with nothing showing
 - Run at startup
 - Import and export your notes as a backup file or as plain text
+- Menus follow your desktop theme: your colour scheme on KDE Plasma, light or dark and
+  your accent colour on GNOME
 
 ## Install
 
@@ -65,6 +66,11 @@ from your application menu to bring hidden notes back.
 
 Notes are stored in `~/.local/share/stickywell/notes.json` (for the snap,
 `~/snap/stickywell/current/.local/share/stickywell/notes.json`).
+
+## Good to know
+
+Stickywell runs through XWayland on Wayland desktops. Native Wayland does not let an
+app choose where its windows go or keep them on top, and sticky notes need both.
 
 ## Licence
 

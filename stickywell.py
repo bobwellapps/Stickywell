@@ -24,17 +24,22 @@ from pathlib import Path
 # reopen where you left them. Prefer X11 (XWayland), fall back to Wayland.
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
-from PyQt6.QtGui import QAction, QColor, QCursor, QGuiApplication, QIcon, QPainter, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, pyqtSlot
+from PyQt6.QtDBus import QDBus, QDBusConnection, QDBusMessage, QDBusVariant
+from PyQt6.QtGui import (
+    QAction, QColor, QCursor, QFont, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette,
+    QPen, QPixmap,
+)
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QSizeGrip,
-    QSystemTrayIcon, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QProxyStyle, QStyle, QStyleFactory, QSystemTrayIcon, QTextEdit, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 APP_NAME = "Stickywell"
 APP_ID = "stickywell"
-VERSION = "1.0"
+VERSION = "1.1"
 
 COLOURS = {
     "Yellow": "#fff3a3",
@@ -193,6 +198,409 @@ def app_icon():
     return QIcon(pix)
 
 
+# ---------------------------------------------------------------- desktop theme
+# The notes keep their own paper colours, but menus, tooltips and dialogs follow
+# the desktop. The copy of Qt bundled with Stickywell cannot load the desktop's
+# own style, so the colours are worked out here:
+#   - KDE Plasma: the full colour scheme and fonts from kdeglobals, read from the
+#     file itself when possible, or through the desktop portal inside the snap
+#     (which is not allowed to read the file).
+#   - GNOME and other desktops with a portal: the light or dark choice and the
+#     accent colour (and GNOME's interface font), turned into Adwaita colours.
+#   - Anything else: Qt's standard look, as before.
+
+PORTAL = ("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+          "org.freedesktop.portal.Settings")
+
+KDE_COLOUR_KEYS = {
+    "Window": ("BackgroundNormal", "ForegroundNormal", "ForegroundInactive"),
+    "View": ("BackgroundNormal", "BackgroundAlternate", "ForegroundNormal",
+             "ForegroundInactive", "ForegroundLink", "ForegroundVisited"),
+    "Button": ("BackgroundNormal", "ForegroundNormal"),
+    "Selection": ("BackgroundNormal", "ForegroundNormal"),
+    "Tooltip": ("BackgroundNormal", "ForegroundNormal"),
+}
+
+# KDE's own defaults, used for anything the colour scheme leaves out.
+BREEZE_LIGHT = {
+    "Window": {"BackgroundNormal": "239,240,241", "ForegroundNormal": "35,38,41",
+               "ForegroundInactive": "112,125,138"},
+    "View": {"BackgroundNormal": "255,255,255", "BackgroundAlternate": "247,247,247",
+             "ForegroundNormal": "35,38,41", "ForegroundInactive": "112,125,138",
+             "ForegroundLink": "41,128,185", "ForegroundVisited": "155,89,182"},
+    "Button": {"BackgroundNormal": "252,252,252", "ForegroundNormal": "35,38,41"},
+    "Selection": {"BackgroundNormal": "61,174,233", "ForegroundNormal": "255,255,255"},
+    "Tooltip": {"BackgroundNormal": "247,247,247", "ForegroundNormal": "35,38,41"},
+}
+BREEZE_DARK = {
+    "Window": {"BackgroundNormal": "32,35,38", "ForegroundNormal": "252,252,252",
+               "ForegroundInactive": "161,169,177"},
+    "View": {"BackgroundNormal": "20,22,24", "BackgroundAlternate": "29,31,34",
+             "ForegroundNormal": "252,252,252", "ForegroundInactive": "161,169,177",
+             "ForegroundLink": "29,153,243", "ForegroundVisited": "155,89,182"},
+    "Button": {"BackgroundNormal": "41,44,48", "ForegroundNormal": "252,252,252"},
+    "Selection": {"BackgroundNormal": "61,174,233", "ForegroundNormal": "252,252,252"},
+    "Tooltip": {"BackgroundNormal": "41,44,48", "ForegroundNormal": "252,252,252"},
+}
+
+
+# GNOME's own colours (libadwaita), in the same layout as a KDE colour scheme.
+ADWAITA_LIGHT = {
+    "Window": {"BackgroundNormal": "250,250,251", "ForegroundNormal": "51,51,54",
+               "ForegroundInactive": "128,128,132"},
+    "View": {"BackgroundNormal": "255,255,255", "BackgroundAlternate": "246,246,247",
+             "ForegroundNormal": "51,51,54", "ForegroundInactive": "128,128,132",
+             "ForegroundLink": "28,113,216", "ForegroundVisited": "129,61,156"},
+    "Button": {"BackgroundNormal": "235,235,237", "ForegroundNormal": "51,51,54"},
+    "Selection": {"BackgroundNormal": "53,132,228", "ForegroundNormal": "255,255,255"},
+    "Tooltip": {"BackgroundNormal": "46,46,50", "ForegroundNormal": "255,255,255"},
+}
+ADWAITA_DARK = {
+    "Window": {"BackgroundNormal": "34,34,38", "ForegroundNormal": "255,255,255",
+               "ForegroundInactive": "154,154,157"},
+    "View": {"BackgroundNormal": "29,29,32", "BackgroundAlternate": "36,36,40",
+             "ForegroundNormal": "255,255,255", "ForegroundInactive": "154,154,157",
+             "ForegroundLink": "120,174,237", "ForegroundVisited": "220,138,221"},
+    "Button": {"BackgroundNormal": "56,56,61", "ForegroundNormal": "255,255,255"},
+    "Selection": {"BackgroundNormal": "53,132,228", "ForegroundNormal": "255,255,255"},
+    "Tooltip": {"BackgroundNormal": "54,54,58", "ForegroundNormal": "255,255,255"},
+}
+# GNOME's named accent colours (Settings > Appearance).
+GNOME_ACCENTS = {
+    "blue": "53,132,228", "teal": "33,144,164", "green": "58,148,74", "yellow": "200,136,0",
+    "orange": "237,91,0", "red": "230,45,66", "pink": "213,97,153", "purple": "145,65,172",
+    "slate": "111,131,150",
+}
+
+
+def portal_accent(value):
+    """The portal's accent colour: three numbers from 0 to 1, or anything else for none."""
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        try:
+            parts = [float(v) for v in value]
+        except (TypeError, ValueError):
+            return None
+        if all(0.0 <= v <= 1.0 for v in parts):
+            return QColor(*(round(v * 255) for v in parts))
+    return None
+
+
+def pango_font(text):
+    """A GNOME font setting such as "Cantarell 11" or "Noto Sans Bold 10"."""
+    if not isinstance(text, str) or " " not in text.strip():
+        return None
+    words = text.split()
+    try:
+        size = float(words[-1])
+    except ValueError:
+        return None
+    words = words[:-1]
+    weights = {"thin": QFont.Weight.Thin, "light": QFont.Weight.Light,
+               "medium": QFont.Weight.Medium, "semi-bold": QFont.Weight.DemiBold,
+               "semibold": QFont.Weight.DemiBold, "bold": QFont.Weight.Bold,
+               "heavy": QFont.Weight.Black, "black": QFont.Weight.Black}
+    weight, italic = QFont.Weight.Normal, False
+    while len(words) > 1 and words[-1].lower() in (*weights, "regular", "book", "italic", "oblique"):
+        word = words.pop().lower()
+        if word in ("italic", "oblique"):
+            italic = True
+        elif word in weights:
+            weight = weights[word]
+    if not words or not 4 <= size <= 72:
+        return None
+    font = QFont(" ".join(words))
+    font.setPointSizeF(size)
+    font.setWeight(weight)
+    font.setItalic(italic)
+    return font
+
+
+def on_kde():
+    desktops = os.environ.get("XDG_CURRENT_DESKTOP", "").upper().split(":")
+    return "KDE" in desktops
+
+
+def read_kdeglobals_file():
+    """kdeglobals as {group: {key: value}}; empty inside the snap, which cannot read it."""
+    if IN_SNAP:
+        return {}
+    config_home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    data = {}
+    for path in ("/etc/xdg/kdeglobals", os.path.join(config_home, "kdeglobals")):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        group = None
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith(("#", ";")):
+                continue
+            if line.startswith("["):
+                group = line[1:-1] if line.endswith("]") else None
+                continue
+            if group is None or "=" not in line:
+                continue
+            key, value = (part.strip() for part in line.split("=", 1))
+            if key.endswith("]"):
+                if "[$" not in key:
+                    continue              # a translated value, such as Name[de]
+                key = key[:key.index("[$")]
+            data.setdefault(group, {})[key] = value
+    return data
+
+
+class PortalReader:
+    """Reads single settings from the desktop portal's Settings interface."""
+
+    def __init__(self):
+        self.bus = QDBusConnection.sessionBus()
+        self.broken = not self.bus.isConnected()
+
+    def read(self, namespace, key, timeout=1000):
+        if self.broken:
+            return None
+        for method in ("ReadOne", "Read"):
+            msg = QDBusMessage.createMethodCall(*PORTAL, method)
+            msg.setArguments([namespace, key])
+            reply = self.bus.call(msg, QDBus.CallMode.Block, timeout)
+            if reply.type() == QDBusMessage.MessageType.ReplyMessage:
+                args = reply.arguments()
+                value = args[0] if args else None
+                while isinstance(value, QDBusVariant):   # Read wraps the value twice
+                    value = value.variant()
+                return value
+            error = reply.errorName()
+            if method == "ReadOne" and error == "org.freedesktop.DBus.Error.UnknownMethod":
+                continue                  # an older portal: try Read instead
+            if not error.startswith("org.freedesktop.portal.Error"):
+                self.broken = True        # no portal at all: stop asking
+            return None
+        return None
+
+
+def read_kdeglobals_portal():
+    """The colour and font settings, and the light/dark preference, via the portal."""
+    reader = PortalReader()
+    scheme = reader.read("org.freedesktop.appearance", "color-scheme", timeout=2000)
+    data = {}
+    for group, keys in KDE_COLOUR_KEYS.items():
+        for key in keys:
+            value = reader.read(f"org.kde.kdeglobals.Colors:{group}", key)
+            if value is not None:
+                data.setdefault(f"Colors:{group}", {})[key] = value
+    for key in ("font", "menuFont"):
+        value = reader.read("org.kde.kdeglobals.General", key)
+        if value:
+            data.setdefault("General", {})[key] = str(value)
+    return data, scheme
+
+
+def parse_kde_colour(value):
+    if isinstance(value, (list, tuple)):
+        parts = list(value)
+    else:
+        text = str(value).strip()
+        if text.startswith("#"):
+            colour = QColor(text)
+            return colour if colour.isValid() else None
+        parts = text.split(",")
+    try:
+        r, g, b = (int(float(p)) for p in parts[:3])
+    except (TypeError, ValueError):
+        return None
+    if not all(0 <= v <= 255 for v in (r, g, b)):
+        return None
+    return QColor(r, g, b)
+
+
+def mix(a, b, amount):
+    return QColor(round(a.red() + (b.red() - a.red()) * amount),
+                  round(a.green() + (b.green() - a.green()) * amount),
+                  round(a.blue() + (b.blue() - a.blue()) * amount))
+
+
+def kde_palette(colours):
+    """Turn KDE colour scheme entries into a Qt palette, the way KDE apps do."""
+    c = colours
+    window, button = c["Window", "BackgroundNormal"], c["Button", "BackgroundNormal"]
+    pal = QPalette(button, window)        # works out the light and dark shades
+    roles = {
+        QPalette.ColorRole.Window: window,
+        QPalette.ColorRole.WindowText: c["Window", "ForegroundNormal"],
+        QPalette.ColorRole.Base: c["View", "BackgroundNormal"],
+        QPalette.ColorRole.AlternateBase: c["View", "BackgroundAlternate"],
+        QPalette.ColorRole.Text: c["View", "ForegroundNormal"],
+        QPalette.ColorRole.PlaceholderText: c["View", "ForegroundInactive"],
+        QPalette.ColorRole.Button: button,
+        QPalette.ColorRole.ButtonText: c["Button", "ForegroundNormal"],
+        QPalette.ColorRole.Highlight: c["Selection", "BackgroundNormal"],
+        QPalette.ColorRole.HighlightedText: c["Selection", "ForegroundNormal"],
+        QPalette.ColorRole.ToolTipBase: c["Tooltip", "BackgroundNormal"],
+        QPalette.ColorRole.ToolTipText: c["Tooltip", "ForegroundNormal"],
+        QPalette.ColorRole.Link: c["View", "ForegroundLink"],
+        QPalette.ColorRole.LinkVisited: c["View", "ForegroundVisited"],
+    }
+    groups = (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive, QPalette.ColorGroup.Disabled)
+    for group in groups:
+        for role, colour in roles.items():
+            pal.setColor(group, role, colour)
+    # Greyed-out text: faded towards the background it sits on.
+    R = QPalette.ColorRole
+    for text_role, back_role in ((R.WindowText, R.Window), (R.Text, R.Base),
+                                 (R.ButtonText, R.Button), (R.HighlightedText, R.Highlight)):
+        pal.setColor(QPalette.ColorGroup.Disabled, text_role,
+                     mix(roles[text_role], roles[back_role], 0.55))
+    return pal
+
+
+class MenuStyle(QProxyStyle):
+    """Qt's standard style, with menu tick boxes that stay visible in dark themes
+    (the standard ones draw their outline darker than a dark background)."""
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element != QStyle.PrimitiveElement.PE_IndicatorCheckBox or not isinstance(widget, QMenu):
+            return super().drawPrimitive(element, option, painter, widget)
+        pal = option.palette
+        on = bool(option.state & QStyle.StateFlag.State_On)
+        enabled = bool(option.state & QStyle.StateFlag.State_Enabled)
+        side = min(option.rect.width(), option.rect.height(), 16) - 2
+        box = QRect(0, 0, side, side)
+        box.moveCenter(option.rect.center())
+        accent = pal.color(QPalette.ColorRole.Highlight)
+        text = pal.color(QPalette.ColorRole.WindowText)
+        back = pal.color(QPalette.ColorRole.Window)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not enabled:
+            painter.setOpacity(0.45)
+        frame = box.toRectF().adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(QPen(accent if on else mix(text, back, 0.45), 1))
+        painter.setBrush(accent if on else pal.color(QPalette.ColorRole.Base))
+        painter.drawRoundedRect(frame, 2.5, 2.5)
+        if on:
+            tick = QPainterPath()
+            tick.moveTo(frame.left() + side * 0.24, frame.top() + side * 0.52)
+            tick.lineTo(frame.left() + side * 0.43, frame.top() + side * 0.70)
+            tick.lineTo(frame.left() + side * 0.77, frame.top() + side * 0.30)
+            pen = QPen(pal.color(QPalette.ColorRole.HighlightedText), max(1.6, side / 8))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(tick)
+        painter.restore()
+
+
+class DesktopTheme(QObject):
+    """Applies the desktop's colours and fonts, and again whenever they change."""
+
+    WATCHED = ("org.kde.kdeglobals", "org.freedesktop.appearance", "org.gnome.desktop.interface")
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.kde = on_kde()
+        self.style = None
+        self.active = False
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(300)
+        self.timer.timeout.connect(self.apply)
+        self.apply()
+        bus = QDBusConnection.sessionBus()
+        if bus.isConnected():
+            bus.connect(PORTAL[0], PORTAL[1], PORTAL[2], "SettingChanged", self.setting_changed)
+
+    @pyqtSlot(QDBusMessage)
+    def setting_changed(self, msg):
+        args = msg.arguments()
+        namespace = str(args[0]) if args else ""
+        if namespace.startswith(self.WATCHED):
+            self.timer.start()
+
+    def use_style(self):
+        if self.style is None:
+            self.style = MenuStyle(QStyleFactory.create("Fusion"))
+            self.app.setStyle(self.style)
+
+    def apply(self):
+        try:
+            if self.kde:
+                self.apply_kde()
+            else:
+                self.apply_portal()
+        except Exception as err:          # never let theming stop the app starting
+            print(f"{APP_NAME}: could not apply the desktop theme: {err}", file=sys.stderr)
+
+    def apply_kde(self):
+        data = read_kdeglobals_file()
+        scheme = None
+        if not any(group.startswith("Colors:") for group in data):
+            portal_data, scheme = read_kdeglobals_portal()
+            for group, values in portal_data.items():
+                data.setdefault(group, {}).update(values)
+        defaults = BREEZE_DARK if scheme == 1 else BREEZE_LIGHT
+        colours = {}
+        for group, keys in KDE_COLOUR_KEYS.items():
+            for key in keys:
+                raw = data.get(f"Colors:{group}", {}).get(key)
+                colour = parse_kde_colour(raw) if raw is not None else None
+                colours[group, key] = colour or parse_kde_colour(defaults[group][key])
+        self.use_style()
+        self.app.setPalette(kde_palette(colours))
+        general = data.get("General", {})
+        font = QFont()
+        if general.get("font") and font.fromString(general["font"]):
+            self.app.setFont(font)
+        menu_font = QFont()
+        if general.get("menuFont") and menu_font.fromString(general["menuFont"]):
+            self.app.setFont(menu_font, "QMenu")
+        self.active = True
+
+    def apply_portal(self):
+        reader = PortalReader()
+        scheme = reader.read("org.freedesktop.appearance", "color-scheme", timeout=2000)
+        if not isinstance(scheme, int) or isinstance(scheme, bool):
+            return                        # no portal, or it does not say: keep Qt's look
+        base = ADWAITA_DARK if scheme == 1 else ADWAITA_LIGHT
+        colours = {(group, key): parse_kde_colour(value)
+                   for group, keys in base.items() for key, value in keys.items()}
+        accent = portal_accent(reader.read("org.freedesktop.appearance", "accent-color"))
+        if accent is None:
+            name = reader.read("org.gnome.desktop.interface", "accent-color")
+            if isinstance(name, str) and name in GNOME_ACCENTS:
+                accent = parse_kde_colour(GNOME_ACCENTS[name])
+        if accent is not None:
+            colours["Selection", "BackgroundNormal"] = accent
+        self.use_style()
+        self.app.setPalette(kde_palette(colours))
+        font = pango_font(reader.read("org.gnome.desktop.interface", "font-name"))
+        if font is not None:
+            self.app.setFont(font)
+            self.app.setFont(font, "QMenu")
+        self.active = True
+
+
+_paper = None
+
+
+def paper_palette():
+    """The light palette the notes have always used, whatever the desktop theme.
+    Every colour is set explicitly, so nothing is taken over from the desktop."""
+    global _paper
+    if _paper is None:
+        standard = QStyleFactory.create("Fusion").standardPalette()
+        _paper = QPalette()
+        for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive,
+                      QPalette.ColorGroup.Disabled):
+            for role in QPalette.ColorRole:
+                if role not in (QPalette.ColorRole.NoRole, QPalette.ColorRole.NColorRoles):
+                    _paper.setBrush(group, role, standard.brush(group, role))
+    return _paper
+
+
 class Popup(QWidget):
     """A small message window built like a note, so it opens just as quickly.
     (Qt's standard message boxes were slow to appear on KDE.)"""
@@ -202,6 +610,7 @@ class Popup(QWidget):
     def __init__(self, text, title):
         super().__init__()
         self.setObjectName("popup")
+        self.setPalette(paper_palette())
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle(title)
@@ -287,6 +696,7 @@ class Note(QWidget):
         self.pinned = bool(data.get("pinned", False))
 
         self.setObjectName("note")
+        self.setPalette(paper_palette())
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(160, 120)
@@ -358,7 +768,8 @@ class Note(QWidget):
         grip_row = QHBoxLayout()
         grip_row.setContentsMargins(0, 0, 0, 0)
         grip_row.addStretch(1)
-        grip_row.addWidget(QSizeGrip(self))
+        self.grip = QSizeGrip(self)
+        grip_row.addWidget(self.grip)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -419,6 +830,11 @@ class Note(QWidget):
             QToolButton:checked {{ background: rgba(0, 0, 0, 55); }}
             QToolButton::menu-indicator {{ image: none; }}
         """)
+        # Style sheets stop the note's own palette reaching the scroll bars and the
+        # resize grip, so set it on them directly: they keep the light look they
+        # have always had, whatever the desktop theme.
+        for part in (self.editor.verticalScrollBar(), self.editor.horizontalScrollBar(), self.grip):
+            part.setPalette(paper_palette())
 
     def _restore_geometry(self, data):
         def num(key, default=None):
@@ -842,6 +1258,7 @@ def main():
     server = QLocalServer()
     server.listen(server_name)
 
+    theme = DesktopTheme(app)   # noqa: F841 (kept alive for theme changes)
     manager = Manager(app)
 
     def on_connection():
