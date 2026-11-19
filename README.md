@@ -8,6 +8,8 @@ Simple sticky notes for the Linux desktop.
 Stickywell puts coloured sticky notes on your desktop and keeps out of the way.
 Type a note, drag it where you want it, and it will still be there next time.
 
+[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/stickywell)
+
 ## Features
 
 - As many notes as you like, in six colours
