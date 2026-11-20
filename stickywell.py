@@ -14,6 +14,7 @@ Needs:     PyQt6  (sudo apt install python3-pyqt6)
 """
 import ctypes
 import ctypes.util
+import html
 import json
 import os
 import sys
@@ -27,8 +28,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
 from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, pyqtSlot
 from PyQt6.QtDBus import QDBus, QDBusConnection, QDBusMessage, QDBusVariant
 from PyQt6.QtGui import (
-    QAction, QColor, QCursor, QFont, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette,
-    QPen, QPixmap,
+    QAction, QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QIcon, QPainter, QPainterPath,
+    QPalette, QPen, QPixmap, QTextDocument,
 )
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
@@ -39,7 +40,7 @@ from PyQt6.QtWidgets import (
 
 APP_NAME = "Stickywell"
 APP_ID = "stickywell"
-VERSION = "1.1"
+VERSION = "1.2"
 
 COLOURS = {
     "Yellow": "#fff3a3",
@@ -52,19 +53,43 @@ COLOURS = {
 DEFAULT_COLOUR = "Yellow"
 DEFAULT_SIZE = (260, 240)
 
-DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / APP_ID
+IN_SNAP = bool(os.environ.get("SNAP") and os.environ.get("SNAP_USER_DATA"))
+
+# Where the notes are kept.
+_LOCAL_DATA_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / APP_ID
+if IN_SNAP and os.environ.get("SNAP_USER_COMMON"):
+    # A snap's normal data folder is kept separately for each version, and is
+    # copied across when the snap updates. If an update happened while
+    # Stickywell was still running (snapd does this after waiting two weeks),
+    # anything typed afterwards would go into the old version's folder and be
+    # missing next time. The snap's "common" folder is the same for every
+    # version, so the notes live there.
+    DATA_DIR = Path(os.environ["SNAP_USER_COMMON"])
+else:
+    DATA_DIR = _LOCAL_DATA_DIR
 DATA_FILE = DATA_DIR / "notes.json"
 
-# Carry over notes from before the app was renamed.
-_OLD_DIR = DATA_DIR.parent / "stickwell"
-if _OLD_DIR.is_dir() and not DATA_DIR.exists():
+if IN_SNAP and DATA_DIR != _LOCAL_DATA_DIR and not DATA_FILE.exists():
+    # Bring the notes across from where earlier versions of the snap kept them
+    # (copied, so the old file stays as it was).
+    _old_file = _LOCAL_DATA_DIR / "notes.json"
     try:
-        _OLD_DIR.rename(DATA_DIR)
-    except OSError:
-        pass
+        if _old_file.is_file():
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            _tmp = DATA_FILE.with_suffix(".json.tmp")
+            _tmp.write_bytes(_old_file.read_bytes())
+            os.replace(_tmp, DATA_FILE)
+    except OSError as _err:
+        print(f"{APP_NAME}: could not bring earlier notes across: {_err}", file=sys.stderr)
+elif not IN_SNAP:
+    # Carry over notes from before the app was renamed.
+    _OLD_DIR = DATA_DIR.parent / "stickwell"
+    if _OLD_DIR.is_dir() and not DATA_DIR.exists():
+        try:
+            _OLD_DIR.rename(DATA_DIR)
+        except OSError:
+            pass
 
-
-IN_SNAP = bool(os.environ.get("SNAP") and os.environ.get("SNAP_USER_DATA"))
 if IN_SNAP:
     # Snaps start at login from a file in their own private config folder.
     AUTOSTART_FILE = Path(os.environ["SNAP_USER_DATA"]) / ".config/autostart" / f"{APP_ID}.desktop"
@@ -607,7 +632,9 @@ class Popup(QWidget):
 
     open_popups = []
 
-    def __init__(self, text, title):
+    def __init__(self, text, title, buttons=None, default=0):
+        """buttons: (label, action, warning) for each button; action runs after the
+        window closes, None just closes it. Enter presses the default button."""
         super().__init__()
         self.setObjectName("popup")
         self.setPalette(paper_palette())
@@ -621,12 +648,18 @@ class Popup(QWidget):
         body = QLabel(text, self)
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        ok = QPushButton("OK", self)
-        ok.setDefault(True)
-        ok.clicked.connect(self.close)
         row = QHBoxLayout()
         row.addStretch(1)
-        row.addWidget(ok)
+        self.default_button = None
+        for index, (label, action, warning) in enumerate(buttons or [("OK", None, False)]):
+            button = QPushButton(label, self)
+            if warning:
+                button.setObjectName("warning")
+            button.clicked.connect(lambda _=False, a=action: self.choose(a))
+            if index == default:
+                button.setDefault(True)
+                self.default_button = button
+            row.addWidget(button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(10)
@@ -640,9 +673,18 @@ class Popup(QWidget):
             QPushButton { color: #2b2b2b; background: #f0e6a8; border: 1px solid #b9ad6a;
                           border-radius: 3px; padding: 4px 18px; font-size: 10pt; }
             QPushButton:hover { background: #e8dc92; }
+            QPushButton#warning { color: #a11212; font-weight: bold; }
         """)
-        self.setMinimumWidth(300)
-        self.setMaximumWidth(520)
+        # Give the text a definite width, so the window is made tall enough for it
+        # (Qt guesses too short a height for long word-wrapped text).
+        self.ensurePolished()
+        body.ensurePolished()
+        doc = QTextDocument()
+        doc.setHtml(text)
+        metrics = QFontMetrics(body.font())
+        longest = max((metrics.horizontalAdvance(line) for line in doc.toPlainText().splitlines()),
+                      default=0)
+        body.setFixedWidth(max(268, min(488, longest + 8)))
         self.adjustSize()
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry()
@@ -653,8 +695,15 @@ class Popup(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self.windowHandle():
             self.windowHandle().startSystemMove()
 
+    def choose(self, action):
+        self.close()
+        if action is not None:
+            action()
+
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.default_button:
+            self.default_button.click()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape):
             self.close()
         else:
             super().keyPressEvent(event)
@@ -669,8 +718,8 @@ class Popup(QWidget):
         event.accept()
 
 
-def notify(text, title=APP_NAME):
-    popup = Popup(text, title)
+def notify(text, title=APP_NAME, buttons=None, default=0):
+    popup = Popup(text, title, buttons, default)
     popup.show()
     popup.raise_()
     popup.activateWindow()
@@ -939,6 +988,7 @@ class Manager:
         self.hidden = False
         self.show_in_taskbar = False
         self.show_tray = True
+        self.restore_actions = []
         saved_notes = self.load()
         self.taskbar_action = QAction("Display Application Icon")
         self.taskbar_action.setCheckable(True)
@@ -971,6 +1021,10 @@ class Manager:
             self.tray_menu.addSeparator()
             self.tray_menu.addAction("Import Notes\u2026", self.import_notes)
             self.tray_menu.addAction("Export Notes\u2026", self.export_notes)
+            self.tray_menu.addAction("Clear All Notes\u2026", self.clear_all)
+            self.restore_actions.append(
+                self.tray_menu.addAction("Restore Cleared Notes", self.restore_cleared))
+            self.tray_menu.aboutToShow.connect(self.update_restore_actions)
             self.tray_menu.addSeparator()
             self.tray_menu.addAction("About", self.about)
             self.tray_menu.addAction("Quit Stickywell", self.quit)
@@ -1000,6 +1054,9 @@ class Manager:
         menu.addSeparator()
         menu.addAction("Import Notes\u2026", self.import_notes)
         menu.addAction("Export Notes\u2026", self.export_notes)
+        menu.addAction("Clear All Notes\u2026", self.clear_all)
+        self.restore_actions.append(menu.addAction("Restore Cleared Notes", self.restore_cleared))
+        menu.aboutToShow.connect(self.update_restore_actions)
         menu.addSeparator()
         menu.addAction("About", self.about)
         menu.addAction("Quit Stickywell\tCtrl+Q", self.quit)
@@ -1064,6 +1121,99 @@ class Manager:
             notify(f"Could not export notes:\n{err}")
             return
         notify(f"Exported {len(self.notes)} note(s) to:\n{path}")
+
+    BACKUP_NAME = "notes-before-clear.json"
+
+    def backup_path(self):
+        return DATA_DIR / self.BACKUP_NAME
+
+    def backup_shown(self):
+        """The backup's location as people would type it, with ~ for the home folder."""
+        shown = str(self.backup_path())
+        if shown.startswith(str(USER_HOME) + os.sep):
+            shown = "~" + shown[len(str(USER_HOME)):]
+        return html.escape(shown)
+
+    def update_restore_actions(self):
+        available = self.backup_path().is_file()
+        for action in list(self.restore_actions):
+            try:
+                action.setEnabled(available)
+            except RuntimeError:          # its note was deleted, and its menu with it
+                self.restore_actions.remove(action)
+
+    def clear_all(self):
+        if not any(note.editor.toPlainText().strip() for note in self.notes):
+            notify("There are no notes to clear.")
+            return
+        count = len(self.notes)
+        what = "your note" if count == 1 else f"all {count} notes"
+        notify(f"Delete {what}?<br><br>"
+               "Before deleting, Stickywell saves a backup copy of your notes, so you can "
+               "get them back: straight away with <i>Undo</i>, or later with "
+               "<i>Restore Cleared Notes</i> in the \u2630 menu.<br><br>"
+               f"The backup is saved in<br><i>{self.backup_shown()}</i><br>"
+               "Only one backup is kept: clearing all notes again replaces it.",
+               "Clear All Notes",
+               buttons=[("Clear All", self._clear_all_now, True), ("Cancel", None, False)],
+               default=1)
+
+    def _clear_all_now(self):
+        if self.hidden:
+            self.show_all()
+        backup = self.backup_path()
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {"version": 1, "notes": [n.to_dict() for n in self.notes]}
+            tmp = backup.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, backup)
+        except OSError as err:
+            notify("Could not save the backup copy, so nothing was deleted:<br>"
+                   f"{html.escape(str(err))}")
+            return
+        for note in list(self.notes):
+            self.notes.remove(note)
+            note.hide()
+            note.deleteLater()
+        self.new_note()               # one fresh, empty note to start again with
+        self.save()
+        notify("All notes deleted.<br><br>"
+               "To get them back, click <i>Undo</i> now, or later choose "
+               "<i>Restore Cleared Notes</i> in the \u2630 menu.<br><br>"
+               f"The backup copy is in<br><i>{self.backup_shown()}</i><br>"
+               "It stays there until the next time you clear all notes.",
+               "Clear All Notes",
+               buttons=[("Undo", self.restore_cleared, False), ("OK", None, False)], default=1)
+
+    def restore_cleared(self):
+        """Bring back the notes saved by the last Clear All (Undo, or the menu item later)."""
+        try:
+            data = json.loads(self.backup_path().read_text(encoding="utf-8"))
+            saved = [n for n in data.get("notes", []) if isinstance(n, dict)]
+        except FileNotFoundError:
+            notify("There are no cleared notes to restore.")
+            return
+        except (OSError, ValueError, AttributeError) as err:
+            notify(f"Could not restore the cleared notes:<br>{html.escape(str(err))}")
+            return
+        if self.hidden:
+            self.show_all()
+        existing = {(n.editor.toPlainText(), n.colour) for n in self.notes}
+        missing = [n for n in saved
+                   if (str(n.get("text", "")), n.get("colour", DEFAULT_COLOUR)) not in existing]
+        if not missing:
+            notify("The cleared notes are already back.")
+            return
+        # Remove the empty note that clearing left, unless something was typed into it.
+        for note in list(self.notes):
+            if not note.editor.toPlainText().strip():
+                self.notes.remove(note)
+                note.hide()
+                note.deleteLater()
+        for item in missing:
+            self._add(item).raise_()
+        self.save()
 
     def import_notes(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1235,8 +1385,17 @@ class Manager:
             self.new_note()
 
     def about(self):
-        notify(f"<b>{APP_NAME}</b> {VERSION}<br>Simple sticky notes for your desktop.",
-               f"About {APP_NAME}")
+        text = f"<b>{APP_NAME}</b> {VERSION}<br>Simple sticky notes for your desktop."
+        if IN_SNAP:
+            text += ("<br><br><b>Updating</b><br>"
+                     "The Snap Store can't update Stickywell while it is open. Hiding "
+                     "your notes doesn't close it: it stays open until you choose "
+                     "<i>Quit Stickywell</i> from the \u2630 menu (or press Ctrl+Q).<br><br>"
+                     "To update, quit Stickywell, let the update finish, then start it "
+                     "again. Your notes are saved as you type, so nothing is lost.<br><br>"
+                     "If Stickywell stays open, the update is installed anyway within two "
+                     "weeks and takes effect the next time it starts.")
+        notify(text, f"About {APP_NAME}")
 
 
 def main():

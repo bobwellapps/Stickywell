@@ -2,13 +2,10 @@
 
 Simple sticky notes for the Linux desktop.
 
-<img width="1728" height="972" alt="stickywelscreenshotl" src="https://github.com/user-attachments/assets/cd440ba3-1a5a-4469-91da-60a76f518abf" />
-
+![Stickywell notes on a desktop](docs/screenshot.png)
 
 Stickywell puts coloured sticky notes on your desktop and keeps out of the way.
 Type a note, drag it where you want it, and it will still be there next time.
-
-[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/stickywell)
 
 ## Features
 
@@ -61,6 +58,8 @@ menu entry is in `packaging/stickywell.desktop`.
 | Change a note's colour | Click the colour square |
 | Keep a note above other windows | Click the pin |
 | Delete a note | Click `✕`, then Delete |
+| Delete all notes | `☰` menu → Clear All Notes… (asks first and saves a backup copy) |
+| Get cleared notes back | Undo, straight after clearing, or `☰` menu → Restore Cleared Notes |
 | Hide or show all notes | Click the tray icon, or press Ctrl+H to hide |
 | Everything else (import, export, startup, icons, quit) | The `☰` menu on any note, or right-click the tray icon |
 
@@ -68,9 +67,16 @@ If you turn off both the tray icon and the application icon, start Stickywell ag
 from your application menu to bring hidden notes back.
 
 Notes are stored in `~/.local/share/stickywell/notes.json` (for the snap,
-`~/snap/stickywell/current/.local/share/stickywell/notes.json`).
+`~/snap/stickywell/common/notes.json`). Clear All Notes saves a backup copy next to it,
+`notes-before-clear.json`, which stays until the next time you clear all notes.
 
 ## Good to know
+
+**Updating the snap.** The Snap Store can't update Stickywell while it's open, and
+hiding your notes doesn't close it: it stays open until you choose *Quit Stickywell*
+from the `☰` menu (or press Ctrl+Q). To update, quit Stickywell, let the update finish,
+then start it again. If it stays open, the update is installed anyway within two weeks
+and takes effect the next time Stickywell starts. Your notes are safe either way.
 
 Stickywell runs through XWayland on Wayland desktops. Native Wayland does not let an
 app choose where its windows go or keep them on top, and sticky notes need both.
