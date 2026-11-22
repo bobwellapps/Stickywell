@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.bobwellapps.Stickywell</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Stickywell</name>
+  <summary>Sticky notes for your desktop</summary>
+  <description>
+    <p>
+      Stickywell puts sticky notes on your Linux desktop: quick coloured notes for
+      reminders, to-do lists, shopping lists and anything else you want to keep in sight.
+    </p>
+    <ul>
+      <li>Add as many notes as you like, in six colours</li>
+      <li>Drag notes anywhere on any monitor, resize them, and keep any note on top</li>
+      <li>Everything saves automatically as you type and comes back where you left it</li>
+      <li>Hide and show all notes with one click from the tray icon</li>
+      <li>Can run quietly with no taskbar or tray icon, and start when you log in</li>
+      <li>Clear all notes, with Undo and a backup copy</li>
+      <li>Import and export notes as a backup file or as plain text</li>
+      <li>Menus follow your desktop theme on KDE Plasma and GNOME</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.bobwellapps.Stickywell.desktop</launchable>
+  <url type="homepage">https://github.com/bobwellapps/Stickywell</url>
+  <url type="bugtracker">https://github.com/bobwellapps/Stickywell/issues</url>
+  <developer id="io.github.bobwellapps">
+    <name>bobwellapps</name>
+  </developer>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Sticky notes on the desktop</caption>
+      <image>https://raw.githubusercontent.com/bobwellapps/Stickywell/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.2" date="2026-11-22">
+      <description>
+        <p>Clear All Notes with Undo, safer notes during Snap Store updates, and clearer messages.</p>
+      </description>
+    </release>
+    <release version="1.1" date="2026-11-19">
+      <description>
+        <p>Menus follow your desktop theme on KDE Plasma and GNOME.</p>
+      </description>
+    </release>
+    <release version="1.0" date="2026-11-15"/>
+  </releases>
+</component>

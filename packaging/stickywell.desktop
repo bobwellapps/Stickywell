@@ -1,11 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Stickywell
-Comment=Simple sticky notes for your desktop
+GenericName=Sticky Notes
+Comment=Sticky notes for your desktop: reminders, to-do lists and quick notes
 # Change this path to wherever you keep stickywell.py (or the AppImage).
 Exec=python3 /opt/stickywell/stickywell.py
 Icon=/opt/stickywell/stickywell.png
 Categories=Utility;
-Keywords=notes;sticky;memo;reminder;
+Keywords=sticky notes;sticky;notes;note;post-it;postit;memo;reminder;reminders;to-do;todo;notepad;desktop notes;
 Terminal=false
 StartupWMClass=stickywell

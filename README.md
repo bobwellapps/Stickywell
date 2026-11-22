@@ -30,8 +30,9 @@ sudo snap install stickywell
 **AppImage**
 
 Download `Stickywell-x.y-x86_64.AppImage` from the
-[Releases page](https://github.com/bobwellapps/stickywell/releases), make it
-executable and run it. Nothing else needs installing.
+[Releases page](https://github.com/bobwellapps/Stickywell/releases), make it
+executable and run it. Nothing else needs installing. It runs on Ubuntu 22.04 and
+newer, and other Linux systems of the same age or newer.
 
 ```
 chmod +x Stickywell-*-x86_64.AppImage
